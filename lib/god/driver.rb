@@ -61,6 +61,7 @@ module God
       @waiting.taint
       @events.taint
       self.taint
+      @mutex = Mutex.new
     end
 
     # 
@@ -69,12 +70,12 @@ module God
     def shutdown
       @shutdown = true
       begin
-        Thread.critical = true
+        @mutex.lock
         @waiting.each do |t|
           t.run
         end
       ensure
-        Thread.critical = false
+        @mutex.unlock
       end
     end
 
@@ -83,20 +84,20 @@ module God
     #
     def pop
       begin
-        while (Thread.critical = true; @events.empty? or !@events.first.due?)
+        while (@mutex.lock; @events.empty? or !@events.first.due?)
           @waiting.push Thread.current
           if @events.empty?
             raise ThreadError, "queue empty" if @shutdown
             Thread.stop
           else
-            Thread.critical = false
+            @mutex.unlock
             sleep @events.first.at - Time.now
-            Thread.critical = true
+            @mutex.lock
           end
         end
         @events.shift
       ensure
-        Thread.critical = false
+        @mutex.unlock
       end
     end
 
@@ -108,7 +109,7 @@ module God
     # happen sooner than the next pending event
     #
     def push(event)
-      Thread.critical = true
+      @mutex.lock
       @events << event
       @events.sort!
       begin
@@ -117,7 +118,7 @@ module God
       rescue ThreadError
         retry
       ensure
-        Thread.critical = false
+        @mutex.unlock
       end
       begin
         t.run if t
