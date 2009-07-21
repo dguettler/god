@@ -61,7 +61,6 @@ module God
       @waiting.taint
       @events.taint
       self.taint
-      @mutex = Mutex.new
     end
 
     # 
@@ -69,13 +68,8 @@ module God
     # 
     def shutdown
       @shutdown = true
-      begin
-        @mutex.lock
-        @waiting.each do |t|
-          t.run
-        end
-      ensure
-        @mutex.unlock
+      @waiting.each do |t|
+        t.run
       end
     end
 
@@ -83,22 +77,16 @@ module God
     # Sleep until the queue has something due
     #
     def pop
-      begin
-        while (@mutex.lock; @events.empty? or !@events.first.due?)
-          @waiting.push Thread.current
-          if @events.empty?
-            raise ThreadError, "queue empty" if @shutdown
-            Thread.stop
-          else
-            @mutex.unlock
-            sleep @events.first.at - Time.now
-            @mutex.lock
-          end
+      while (@events.empty? or !@events.first.due?)
+        @waiting.push Thread.current
+        if @events.empty?
+          raise ThreadError, "queue empty" if @shutdown
+          Thread.stop
+        else
+          sleep @events.first.at - Time.now
         end
-        @events.shift
-      ensure
-        @mutex.unlock
       end
+      @events.shift
     end
 
     alias shift pop
@@ -109,7 +97,6 @@ module God
     # happen sooner than the next pending event
     #
     def push(event)
-      @mutex.lock
       @events << event
       @events.sort!
       begin
@@ -117,8 +104,6 @@ module God
         t.wakeup if t
       rescue ThreadError
         retry
-      ensure
-        @mutex.unlock
       end
       begin
         t.run if t
